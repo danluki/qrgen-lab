@@ -34,8 +34,9 @@ jobs:
 
       - name: Build Go services
         run: |
-          go build ./gateway
-          go build ./qrgen
+          mkdir -p bin
+          go build -o ./bin/gateway ./gateway
+          go build -o ./bin/qrgen ./qrgen
 
       - name: Install frontend dependencies
         working-directory: frontend
