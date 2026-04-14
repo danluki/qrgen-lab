@@ -51,7 +51,7 @@ jobs:
         if: matrix.language == 'javascript-typescript'
         working-directory: frontend
         run: |
-          bun install --frozen-lockfile=false
+          bun install
           bun run build
 
       - name: Perform CodeQL analysis

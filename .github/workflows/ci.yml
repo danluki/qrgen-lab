@@ -40,7 +40,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: bun install --frozen-lockfile=false
+        run: bun install
 
       - name: Build frontend
         working-directory: frontend
