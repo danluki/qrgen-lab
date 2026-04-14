@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,12 +14,53 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
 type createTaskRequest struct {
 	Content string `json:"content"`
 	Size    int    `json:"size"`
+}
+
+var (
+	gatewayRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "qrgen_gateway_http_requests_total",
+			Help: "Total number of HTTP requests handled by the gateway.",
+		},
+		[]string{"method", "route", "status"},
+	)
+	gatewayRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "qrgen_gateway_http_request_duration_seconds",
+			Help:    "Duration of HTTP requests handled by the gateway.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "route"},
+	)
+	gatewayTasksCreated = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "qrgen_gateway_tasks_created_total",
+			Help: "Total number of QR generation tasks created by the gateway.",
+		},
+	)
+	gatewayTasksFailed = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "qrgen_gateway_task_enqueue_failures_total",
+			Help: "Total number of task enqueue failures in the gateway.",
+		},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(
+		gatewayRequestsTotal,
+		gatewayRequestDuration,
+		gatewayTasksCreated,
+		gatewayTasksFailed,
+	)
 }
 
 func main() {
@@ -36,10 +78,12 @@ func main() {
 	})
 	defer rdb.Close()
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.Logger(), gin.Recovery(), prometheusMiddleware())
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	router.POST("/api/tasks", func(c *gin.Context) {
 		var req createTaskRequest
@@ -88,6 +132,7 @@ func main() {
 		task := asynq.NewTask(app.TaskTypeGenerateQR, payload)
 		info, err := client.EnqueueContext(ctx, task, asynq.TaskID(taskID), asynq.MaxRetry(10), asynq.Timeout(2*time.Minute))
 		if err != nil {
+			gatewayTasksFailed.Inc()
 			record.Status = "failed"
 			record.Error = err.Error()
 			record.UpdatedAt = time.Now().UTC()
@@ -95,6 +140,8 @@ func main() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue task"})
 			return
 		}
+
+		gatewayTasksCreated.Inc()
 
 		c.JSON(http.StatusAccepted, gin.H{
 			"task": gin.H{
@@ -195,4 +242,20 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func prometheusMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		status := strconv.Itoa(c.Writer.Status())
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+
+		gatewayRequestsTotal.WithLabelValues(c.Request.Method, route, status).Inc()
+		gatewayRequestDuration.WithLabelValues(c.Request.Method, route).Observe(time.Since(start).Seconds())
+	}
 }

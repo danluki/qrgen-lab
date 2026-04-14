@@ -11,6 +11,10 @@
 - `gateway` — API на Go + Gin. Принимает запросы, создаёт задачи и кладёт их в очередь Asynq.
 - `qrgen` — фоновый обработчик задач на Go. Забирает задания из очереди и генерирует PNG с QR-кодом.
 - `redis` — брокер очередей и хранилище состояния задач/результатов.
+- `prometheus` — сбор и хранение метрик.
+- `grafana` — визуализация метрик и логов.
+- `loki` — централизованное хранение логов.
+- `promtail` — сбор логов контейнеров Docker и отправка их в Loki.
 
 ## Как это работает
 
@@ -19,6 +23,9 @@
 3. `gateway` создаёт запись задачи в Redis и ставит её в очередь Asynq.
 4. `qrgen` получает задачу, генерирует QR-код и сохраняет PNG в Redis.
 5. Frontend опрашивает `GET /api/tasks/:id` и показывает изображение после завершения.
+6. Prometheus регулярно снимает метрики с `gateway` и `qrgen`.
+7. Promtail собирает логи контейнеров и отправляет их в Loki.
+8. Grafana показывает метрики и логи на готовом дашборде.
 
 ## Запуск
 
@@ -26,15 +33,68 @@
 docker compose up
 ```
 
-После запуска приложение доступно по адресу:
+После запуска доступны:
 
-- `http://localhost:8080`
+- приложение: `http://localhost:8080`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
 
-При необходимости можно переопределить внешний порт:
+Данные для входа в Grafana:
+
+- логин: `admin`
+- пароль: `admin`
+
+При необходимости можно переопределить внешние порты:
 
 ```bash
-APP_PORT=8090 docker compose up
+APP_PORT=8090 GRAFANA_PORT=3001 PROMETHEUS_PORT=9091 docker compose up
 ```
+
+## Метрики
+
+### Gateway
+
+`gateway` экспортирует метрики на `/metrics`:
+
+- `qrgen_gateway_http_requests_total`
+- `qrgen_gateway_http_request_duration_seconds`
+- `qrgen_gateway_tasks_created_total`
+- `qrgen_gateway_task_enqueue_failures_total`
+
+### QR Worker
+
+`qrgen` экспортирует метрики на порту `2112`:
+
+- `qrgen_worker_tasks_processed_total`
+- `qrgen_worker_task_duration_seconds`
+- `qrgen_worker_tasks_in_progress`
+
+## Логи
+
+Логи всех контейнеров собираются через Promtail из Docker и отправляются в Loki.
+
+В Grafana можно смотреть:
+
+- общий поток логов по проекту;
+- логи конкретного сервиса по label `service`;
+- логи по контейнеру через label `container`.
+
+## Grafana
+
+Provisioning настроен автоматически:
+
+- datasource `Prometheus`
+- datasource `Loki`
+- dashboard `QRGen Overview`
+
+Готовый дашборд содержит:
+
+- rate HTTP-запросов gateway;
+- p95 latency gateway;
+- число обработанных задач worker;
+- среднее время обработки задачи;
+- текущее число задач в работе;
+- централизованные логи контейнеров.
 
 ## API
 
@@ -81,13 +141,25 @@ Pipeline автоматически запускается:
 6. Проверка корректности `docker compose config`.
 7. Smoke-test через `docker compose up -d --build` с реальным HTTP-запросом к приложению.
 
-### Что проверяет smoke-test
+## Корректный запуск с мониторингом
 
-Скрипт [scripts/ci-smoke.sh](/home/danluki/projects/qrgen/scripts/ci-smoke.sh):
+```shell
+APP_PORT=18080 GRAFANA_PORT=13000 PROMETHEUS_PORT=19090 docker compose up
+```
 
-- поднимает все контейнеры;
-- использует отдельный порт `18080`, чтобы не конфликтовать с локальным запуском;
-- ждёт готовности `GET /healthz`;
-- создаёт задачу генерации QR-кода;
-- дожидается статуса `completed`;
-- скачивает PNG и убеждается, что файл не пустой.
+## Скриншоты Для Отчёта
+
+Плейсхолдеры для скриншотов:
+
+- lab106 успешный CI/CD: [data/screenshots/lab106/](/home/danluki/projects/qrgen/data/screenshots/lab106)
+- lab107 Grafana dashboard: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
+- lab107 Grafana Explore / Loki logs: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
+- lab107 Prometheus targets: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
+
+Можно сохранить, например:
+
+- `data/screenshots/lab106/ci-success.png`
+- `data/screenshots/lab106/ci-failed.png`
+- `data/screenshots/lab107/grafana-dashboard.png`
+- `data/screenshots/lab107/grafana-logs.png`
+- `data/screenshots/lab107/prometheus-targets.png`
