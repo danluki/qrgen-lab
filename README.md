@@ -122,44 +122,46 @@ GET /api/tasks/{id}
 GET /api/tasks/{id}/image
 ```
 
-## CI/CD
+## CI/CD И Автоматические Проверки Безопасности
 
-Для проекта настроен pipeline на GitHub Actions: [.github/workflows/ci.yml](/home/danluki/projects/qrgen/.github/workflows/ci.yml)
+Для проекта настроены workflow GitHub Actions:
 
-Pipeline автоматически запускается:
+- CI: [.github/workflows/ci.yml](/home/danluki/projects/qrgen/.github/workflows/ci.yml)
+- CodeQL: [.github/workflows/codeql.yml](/home/danluki/projects/qrgen/.github/workflows/codeql.yml)
 
-- при `push` в репозиторий;
-- при `pull_request`.
+Workflow автоматически запускаются:
 
-### Шаги pipeline
+- при `push` в любую ветку;
+- при `pull_request`;
 
-1. Клонирование репозитория.
-2. Установка Go и Bun.
-3. Установка зависимостей проекта.
-4. Сборка backend и frontend.
-5. Запуск `go test ./...`.
-6. Проверка корректности `docker compose config`.
-7. Smoke-test через `docker compose up -d --build` с реальным HTTP-запросом к приложению.
+### Что проверяет pipeline
+
+`CI`:
+
+1. Клонирует репозиторий.
+2. Поднимает окружение для Go и Bun.
+3. Запускает `go test ./...`.
+4. Проверяет сборку Go-сервисов `gateway` и `qrgen`.
+5. Устанавливает зависимости frontend и собирает Vite-приложение.
+6. Валидирует `docker compose config`.
+7. Выполняет smoke-test через `docker compose up -d --build` и реальный HTTP-запрос к приложению.
+
+Проверки безопасности:
+
+1. `Semgrep` выполняет SAST-анализ для Go, JavaScript, Docker и дополнительно ищет небезопасные паттерны и потенциальные секреты.
+2. `Gitleaks` сканирует историю и текущее состояние репозитория на наличие секретов.
+3. `CodeQL` анализирует Go- и JavaScript-код и публикует security alerts в GitHub.
+
+### Локальный Прогон Перед Push
+
+```bash
+go test ./...
+docker compose config
+./scripts/ci-smoke.sh
+```
 
 ## Корректный запуск с мониторингом
 
 ```shell
 APP_PORT=18080 GRAFANA_PORT=13000 PROMETHEUS_PORT=19090 docker compose up
 ```
-
-## Скриншоты Для Отчёта
-
-Плейсхолдеры для скриншотов:
-
-- lab106 успешный CI/CD: [data/screenshots/lab106/](/home/danluki/projects/qrgen/data/screenshots/lab106)
-- lab107 Grafana dashboard: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
-- lab107 Grafana Explore / Loki logs: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
-- lab107 Prometheus targets: [data/screenshots/lab107/](/home/danluki/projects/qrgen/data/screenshots/lab107)
-
-Можно сохранить, например:
-
-- `data/screenshots/lab106/ci-success.png`
-- `data/screenshots/lab106/ci-failed.png`
-- `data/screenshots/lab107/grafana-dashboard.png`
-- `data/screenshots/lab107/grafana-logs.png`
-- `data/screenshots/lab107/prometheus-targets.png`

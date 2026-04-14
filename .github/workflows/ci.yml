@@ -1,13 +1,17 @@
-name: CI/CD
+name: CI
 
 on:
   push:
     branches:
-      - '**'
+      - "**"
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  pipeline:
+  build-test:
+    name: Build And Test
     runs-on: ubuntu-latest
 
     steps:
@@ -18,31 +22,63 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.1.38'
+          bun-version: 1.1.38
 
-      - name: Install Go dependencies
-        run: go mod download
+      - name: Run Go tests
+        run: go test ./...
+
+      - name: Build Go services
+        run: |
+          go build ./gateway
+          go build ./qrgen
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: bun install
-
-      - name: Build Go services
-        run: go build ./...
+        run: bun install --frozen-lockfile=false
 
       - name: Build frontend
         working-directory: frontend
         run: bun run build
 
-      - name: Run Go tests
-        run: go test ./...
-
-      - name: Validate Docker Compose
+      - name: Validate docker compose configuration
         run: docker compose config
 
-      - name: Smoke test via Docker Compose
+      - name: Run smoke test
         run: ./scripts/ci-smoke.sh
+
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/go
+            p/javascript
+            p/docker
+            p/secrets
+
+  gitleaks:
+    name: Gitleaks Secrets Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
